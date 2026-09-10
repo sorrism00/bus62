@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🚌 62번 버스 실시간 시스템 (웹앱 직접 연동)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+    body { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif; }
+    .sheet-grid { grid-template-columns: 2.8fr 1.8fr 1.3fr 0.9fr; }
+    @media (max-width: 640px) { .sheet-grid { grid-template-columns: 2.7fr 1.8fr 1.3fr 0.8fr; } }
+    .pulse-dot { animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen pb-10">
+
+  <!-- 상단 네비게이션 헤더 -->
+  <header class="bg-slate-900 text-white sticky top-0 z-50 shadow-md border-b border-slate-800">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center gap-3">
+      <div class="flex items-center gap-3">
+        <div class="bg-yellow-400 text-slate-900 font-extrabold text-xl px-3 py-1 rounded-lg flex items-center shadow shrink-0">
+          <i class="fa-solid font-bold fa-bus mr-2"></i>62
+        </div>
+        <div class="text-xs sm:text-sm">
+          <span class="text-slate-400">최종 업데이트</span>
+          <div id="lastUpdated" class="font-mono text-cyan-400 font-bold">-</div>
+        </div>
+      </div>
+      <button id="refreshBtn" onclick="fetchBusData()" class="bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs sm:text-sm font-medium px-3 sm:px-4 py-2 rounded-lg transition-all flex items-center shadow shrink-0">
+        <i id="refreshIcon" class="fa-solid fa-rotate mr-1.5 sm:mr-2"></i>
+        <span>실시간 갱신</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- 로딩 오버레이 -->
+  <div id="loadingOverlay" class="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex flex-col items-center justify-center transition-opacity duration-300">
+    <div class="bg-white p-6 rounded-2xl shadow-xl flex flex-col items-center border border-slate-200">
+      <div class="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-3"></div>
+      <div class="font-bold text-slate-800 text-base">카카오맵 실시간 데이터를 불러오는 중...</div>
+      <div class="text-xs text-slate-500 mt-1">안정적인 프라시 서버를 통해 스크래핑하고 있습니다.</div>
+    </div>
+  </div>
+
+  <main class="max-w-7xl mx-auto px-2 sm:px-4 mt-4">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      
+      <!-- BLOCK 1: 출근 (A~L) -->
+      <section id="block1Container" class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+        <div onclick="toggleMobileTab()" class="bg-indigo-900 text-white px-4 py-2.5 flex justify-between items-center font-bold cursor-pointer md:cursor-default select-none">
+          <span class="flex items-center text-base sm:text-lg"><i class="fa-solid fa-route mr-2 text-yellow-400"></i> 출근</span>
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-normal opacity-80" id="b1Count">0개 정류장</span>
+            <span class="md:hidden text-xs bg-indigo-800 text-yellow-300 border border-indigo-700 px-2.5 py-1 rounded-lg flex items-center gap-1.5 font-semibold">
+              <span>퇴근 전환</span><i class="fa-solid fa-arrows-rotate text-[11px]"></i>
+            </span>
+          </div>
+        </div>
+        <div class="bg-slate-50 border-b border-slate-200 grid sheet-grid text-xs font-bold text-slate-500 text-center py-2 px-1">
+          <div>정류장</div><div>도착 정보</div><div>배차/예상시간</div><div>버스</div>
+        </div>
+        <div id="block1List" class="divide-y-0 text-xs sm:text-sm">
+          <div class="p-8 text-center text-slate-400">데이터 대기 중...</div>
+        </div>
+      </section>
+
+      <!-- BLOCK 2: 퇴근 (N~Y) -->
+      <section id="block2Container" class="hidden md:block bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+        <div onclick="toggleMobileTab()" class="bg-slate-800 text-white px-4 py-2.5 flex justify-between items-center font-bold cursor-pointer md:cursor-default select-none">
+          <span class="flex items-center text-base sm:text-lg"><i class="fa-solid fa-route mr-2 text-cyan-400"></i> 퇴근</span>
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-normal opacity-80" id="b2Count">0개 정류장</span>
+            <span class="md:hidden text-xs bg-slate-700 text-cyan-300 border border-slate-600 px-2.5 py-1 rounded-lg flex items-center gap-1.5 font-semibold">
+              <span>출근 전환</span><i class="fa-solid fa-arrows-rotate text-[11px]"></i>
+            </span>
+          </div>
+        </div>
+        <div class="bg-slate-50 border-b border-slate-200 grid sheet-grid text-xs font-bold text-slate-500 text-center py-2 px-1">
+          <div>정류장</div><div>도착 정보</div><div>배차/예상시간</div><div>버스</div>
+        </div>
+        <div id="block2List" class="divide-y-0 text-xs sm:text-sm">
+          <div class="p-8 text-center text-slate-400">데이터 대기 중...</div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <script>
+    // 62번 버스 기본 고유 ID 정보 정의
+    const BUS_ID = "100000012"; // 62번 버스 ID 예시 (카카오맵 기준)
+    
+    // 출근 블록 정류장 데이터 구조 (기존 시트 A~L열 기준 반영)
+    const BLOCK1_STATIONS = [
+      { order: 51, name: "제물포고청소년수련관", stopId: "BS101041", stationId: "36026" },
+      { order: 52, name: "배다리삼거리", stopId: "BS101024", stationId: "36007" },
+      { order: 53, name: "배다리", stopId: "BS100860", stationId: "35186" },
+      { order: 54, name: "동인천역", stopId: "BS100565", stationId: "35191" },
+      { order: 55, name: "화수사거리", stopId: "BS144835", stationId: "30138" },
+      { order: 56, name: "미림극장", stopId: "BS101026", stationId: "36009" },
+      { order: 57, name: "배다리삼거리", stopId: "BS101023", stationId: "36006" },
+      { order: 58, name: "삼익아파트.부동산.세화복", stopId: "BS101032", stationId: "30017" },
+      { order: 59, name: "송림고거리", stopId: "BS132432", stationId: "36131" },
+      { order: 60, name: "동산고", stopId: "BS101033", stationId: "36018" },
+      { order: 61, name: "동산고회", stopId: "BS101097", stationId: "36010" },
+      { order: 62, name: "재능프선원(구박문여고", stopId: "BS101021", stationId: "36003" },
+      { order: 63, name: "송림초교", stopId: "BS119256", stationId: "37540" },
+      { order: 64, name: "재능로교", stopId: "BS101531", stationId: "37502" },
+      { order: 65, name: "성스산업연구소(스마트", stopId: "BS101441", stationId: "37375" },
+      { order: 66, name: "정부인천지방합동청사", stopId: "BS101451", stationId: "37386" },
+      { order: 67, name: "대화초등학교", stopId: "BS101437", stationId: "37397" },
+      { order: 68, name: "전해와이파크", stopId: "BS101467", stationId: "37408" },
+      { order: 69, name: "대화아파트", stopId: "BS101472", stationId: "37413" },
+      { order: 70, name: "주안북초등학교", stopId: "BS101475", stationId: "37417" },
+      { order: 71, name: "주안북초교", stopId: "BS101478", stationId: "37420" },
+      { order: 72, name: "신일빌딩 우체국급국", stopId: "BS101483", stationId: "37425" },
+      { order: 73, name: "꽃마을아파트", stopId: "BS101489", stationId: "37434" },
+      { order: 74, name: "간석북부역·우성1차", stopId: "BS102214", stationId: "39308" }
+    ];
+
+    // 퇴근 블록 정류장 데이터 구조 (기존 시트 N~Y열 기준 반영)
+    const BLOCK2_STATIONS = [
+      { order: 10, name: "인천시청역창교", stopId: "BS127848", stationId: "39767" },
+      { order: 11, name: "주안2차아파트", stopId: "BS102090", stationId: "38225" },
+      { order: 12, name: "임광그대가.서광자이아파", stopId: "BS102338", stationId: "38514" },
+      { order: 13, name: "더샵인천스카이뷰", stopId: "BS107055", stationId: "38516" },
+      { order: 14, name: "더샵이화뷰입구", stopId: "BS102129", stationId: "38515" },
+      { order: 15, name: "시장중창원(캠퍼스)", stopId: "BS102409", stationId: "38336" },
+      { order: 16, name: "정수고", stopId: "BS102188", stationId: "38338" },
+      { order: 17, name: "인천남수고등학교", stopId: "BS102459", stationId: "39081" },
+      { order: 18, name: "남동회원", stopId: "BS102153", stationId: "38300" },
+      { order: 19, name: "인수동주민센터입구", stopId: "BS100130", stationId: "39277" },
+      { order: 20, name: "남동구청", stopId: "BS102111", stationId: "39255" },
+      { order: 21, name: "노인복지관", stopId: "BS541824", stationId: "92072" },
+      { order: 22, name: "인수초등학교", stopId: "BS102167", stationId: "38263" },
+      { order: 23, name: "건설기술교육원", stopId: "BS102169", stationId: "38262" },
+      { order: 24, name: "건설기술교육원", stopId: "BS102206", stationId: "39354" },
+      { order: 25, name: "인수총등학교(터미널)", stopId: "BS100229", stationId: "39386" },
+      { order: 26, name: "인수수교1단지", stopId: "BS102242", stationId: "39420" },
+      { order: 27, name: "인수아파트", stopId: "BS100557", stationId: "39420" },
+      { order: 28, name: "민수방시", stopId: "BS102269", stationId: "39433" },
+      { order: 29, name: "인수5동주민센터", stopId: "BS100263", stationId: "39427" },
+      { order: 30, name: "간석사거리(상인천역", stopId: "BS102262", stationId: "39426" },
+      { order: 31, name: "간석시", stopId: "BS102272", stationId: "39445" },
+      { order: 32, name: "간석오거리역(교원공제조", stopId: "BS102281", stationId: "39444" },
+      { order: 33, name: "간석오거리역(8번출구)", stopId: "BS102284", stationId: "39449" },
+      { order: 34, name: "간석4동행정복지센터", stopId: "BS102244", stationId: "39403" },
+      { order: 35, name: "돌암산리", stopId: "BS102215", stationId: "39372" },
+      { order: 36, name: "간석오거리역(간석구)", stopId: "BS102262", stationId: "39447" }
+    ];
+
+    window.onload = function() {
+      fetchBusData();
+    };
+
+    // 멀티 프록시를 통한 안정적인 HTML 패치 함수
+    async function fetchWithCorsProxy(targetUrl) {
+      const proxies = [
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
+        `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
+        `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`
+      ];
+
+      for (let proxyUrl of proxies) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 6000); // 6초 타임아웃
+          
+          const response = await fetch(proxyUrl, { signal: controller.signal });
+          clearTimeout(timeoutId);
+
+          if (response.ok) {
+            const text = await response.text();
+            if (text && text.length > 100) return text; // 유효한 HTML 내용 확인
+          }
+        } catch (e) {
+          // 다음 프록시로 자동 우회
+        }
+      }
+      return "";
+    }
+
+    // 메인 데이터 가져오기 및 파싱 프로세스
+    async function fetchBusData() {
+      const loadingEl = document.getElementById('loadingOverlay');
+      const refreshIcon = document.getElementById('refreshIcon');
+      
+      loadingEl.style.opacity = '1';
+      loadingEl.style.pointerEvents = 'auto';
+      refreshIcon.classList.add('fa-spin');
+
+      try {
+        // 1. 노선 전체 상세 정보(위치 및 구간 속도) 가져오기
+        const detailUrl = `https://m.map.kakao.com/actions/busDetailInfo?busId=${BUS_ID}`;
+        const detailHtml = await fetchWithCorsProxy(detailUrl);
+
+        const busDataMap = {};
+        const speedDataMap = {};
+
+        if (detailHtml) {
+          // 버스 현위치 파싱
+          const regex = /<span class="ico_businfo bus_0101">([^<]+)<\/span>[\s\S]*?<span class="txt_bus bus_info_txt">(\d+)<\/span>[\s\S]*?<span class="screen_out">[^<]*버스 정류장 번호\s*:\s*(\d+)<\/span>/g;
+          let match;
+          while ((match = regex.exec(detailHtml)) !== null) {
+            const busCate = match[1] ? match[1].trim() : "일반";
+            const busNum = match[2] ? match[2].trim() : "";
+            const stationId = match[3] ? match[3].trim() : null;
+            if (stationId) {
+              const formattedText = `${busNum}\n(${busCate})`;
+              busDataMap[stationId] = busDataMap[stationId] ? busDataMap[stationId] + ", " + formattedText : formattedText;
+            }
+          }
+
+          // 구간 속도(혼잡도) 파싱
+          const speedRegex = /<li[^>]*data-id="(\d+)"[\s\S]*?<div class="before_speed\s*([^"]*)">[\s\S]*?<div class="after_speed\s*([^"]*)">/g;
+          let speedMatch;
+          while ((speedMatch = speedRegex.exec(detailHtml)) !== null) {
+            speedDataMap[speedMatch[1].trim()] = {
+              before: speedMatch[2].trim(),
+              after: speedMatch[3].trim()
+            };
+          }
+        }
+
+        // 2. 블록 1, 블록 2 데이터 병렬 스크래핑 처리
+        const processedBlock1 = await processStationBlock(BLOCK1_STATIONS, busDataMap, speedDataMap);
+        const processedBlock2 = await processStationBlock(BLOCK2_STATIONS, busDataMap, speedDataMap);
+
+        // 3. 렌더링 반영
+        renderList('block1List', processedBlock1, 'b1Count', false);
+        renderList('block2List', processedBlock2, 'b2Count', true);
+
+        const now = new Date();
+        document.getElementById('lastUpdated').innerText = now.toLocaleTimeString('ko-KR');
+
+      } catch (err) {
+        console.error("데이터 갱신 중 오류:", err);
+      } finally {
+        loadingEl.style.opacity = '0';
+        loadingEl.style.pointerEvents = 'none';
+        refreshIcon.classList.remove('fa-spin');
+      }
+    }
+
+    // 각 정류장별 상세 도착 정보 스크래핑 및 구간 계산
+    async function processStationBlock(stations, busDataMap, speedDataMap) {
+      const results = [];
+      const colorMap = { "green": "#34A853", "yellow": "#FBBC05", "red": "#EA4335", "grey": "#9AA0A6", "gray": "#9AA0A6" };
+
+      // 부하 분산 및 안정성을 위해 순차적으로 정류장 정보 요청 처리
+      for (let station of stations) {
+        const stationUrl = `https://m.map.kakao.com/actions/busStationInfo?busStopId=${station.stopId}&busId=${BUS_ID}&busOrder=${station.order}&_=${new Date().getTime()}`;
+        const html = await fetchWithCorsProxy(stationUrl);
+        const arrivals = parseKakaoBusHtml(html, "62");
+
+        const arrival1 = arrivals[0] ? (arrivals[0][0] + " " + arrivals[0][1]).trim() : "정보 없음";
+        const arrival2 = arrivals[1] ? (arrivals[1][0] + " " + arrivals[1][1]).trim() : "";
+
+        let speedInfo = speedDataMap[station.stationId] || { before: "", after: "" };
+        let stationBg = colorMap[speedInfo.after] || null;
+        let busLoc = busDataMap[station.stationId] || "";
+
+        results.push({
+          station: station.name,
+          stationBg: stationBg,
+          arrival: arrival1,
+          arrivalBg: null,
+          interval: arrival2,
+          busLoc: busLoc
+        });
+      }
+      return results;
+    }
+
+    // 카카오맵 HTML 파서 헬퍼
+    function parseKakaoBusHtml(html, busNo) {
+      try {
+        const allBlocks = html.match(/<a[^>]*class="link_result"[\s\S]*?<\/a>/g);
+        if (!allBlocks) return [];
+
+        const targetBlock = allBlocks.find(block => {
+          const checkRegex = new RegExp('\\s*' + busNo + '\\s*<\\/strong>');
+          return checkRegex.test(block);
+        });
+        if (!targetBlock) return [];
+
+        const results = [];
+        const situationRegex = /<span class="[^"]*(?:txt_situation|txt_state)[^"]*">([\s\S]*?)<\/span>/g;
+        let match;
+
+        while ((match = situationRegex.exec(targetBlock)) !== null) {
+          let info = match[1].replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim();
+          if (info) {
+            if (info.includes("곧도착")) info = info.replace("곧도착", "곧 도착");
+            const timeMatch = info.match(/(.*?)\s*\(\d+번째 전\)/);
+            if (timeMatch) {
+              const numMatch = info.match(/(\d+)번째 전/);
+              results.push([timeMatch[1].trim(), `(${numMatch ? numMatch[1] : ""})`]);
+            } else {
+              results.push([info, ""]);
+            }
+          }
+        }
+        return results;
+      } catch (e) {
+        return [["정보 없음", ""]];
+      }
+    }
+
+    // UI 렌더링 함수
+    function renderList(containerId, list, countId, isBlock2) {
+      const container = document.getElementById(containerId);
+      const countEl = document.getElementById(countId);
+      if (countEl) countEl.innerText = `${list.length}개 정류장`;
+
+      if (!list || list.length === 0) {
+        container.innerHTML = `<div class="p-8 text-center text-slate-400">데이터가 없습니다.</div>`;
+        return;
+      }
+
+      let html = '';
+      list.forEach((row) => {
+        const stationStyle = getCustomBgStyle(row.stationBg);
+        
+        let busBadge = '';
+        if (row.busLoc) {
+          const cleanBusLoc = row.busLoc.replace(/\n/g, '');
+          const specialStations = ["정부인천지방합동청사", "서창동화원(캠퍼스)", "인수초등학교(터미널)"];
+          const isSpecial = specialStations.some(s => row.station && row.station.trim().includes(s));
+          
+          if (isSpecial) {
+            busBadge = `<span class="inline-block bg-black text-yellow-300 font-bold px-1.5 py-0.5 rounded text-[10px] sm:text-[11px] border border-yellow-400 shadow">${cleanBusLoc}</span>`;
+          } else {
+            busBadge = `<span class="inline-block bg-white text-slate-900 font-bold px-1.5 py-0.5 rounded text-[10px] sm:text-[11px] border border-slate-300 shadow-sm">${cleanBusLoc}</span>`;
+          }
+        }
+
+        const borderStations = ["동인천역", "정부인천지방합동청사", "간석북부역·우성1차", "서창동화원(캠퍼스)", "인수초등학교(터미널)", "간석오거리역(8번출구)"];
+        const isBorder = row.station && borderStations.some(s => {
+          if (isBlock2 && s === "간석북부역·우성1차") return false;
+          return row.station.trim() === s;
+        });
+        const rowBorderStyle = isBorder ? 'border-4 border-black z-10 relative font-extrabold my-1 rounded-sm' : 'border-b border-slate-200';
+
+        html += `
+          <div class="grid sheet-grid items-stretch text-center hover:bg-slate-50 transition-colors ${rowBorderStyle} h-9">
+            <div class="flex items-center justify-center px-1 font-bold text-slate-800 border-r border-slate-200 truncate ${stationStyle}">
+              <span class="text-[11px] sm:text-xs tracking-tight truncate px-0.5">${row.station || ''}</span>
+            </div>
+            <div class="flex items-center justify-center px-1 font-semibold text-xs whitespace-nowrap border-r border-slate-200">
+              <span class="truncate">${row.arrival || ''}</span>
+            </div>
+            <div class="flex items-center justify-center px-1 text-xs text-slate-700 whitespace-nowrap border-r border-slate-200">
+              <div>${row.interval || ''}</div>
+            </div>
+            <div class="flex items-center justify-center px-0.5 whitespace-nowrap">
+              ${busBadge}
+            </div>
+          </div>
+        `;
+      });
+      container.innerHTML = html;
+    }
+
+    function getCustomBgStyle(hexColor) {
+      if (!hexColor) return '';
+      if (hexColor === '#34A853') return 'bg-emerald-500 text-white font-bold rounded';
+      if (hexColor === '#FBBC05') return 'bg-yellow-300 text-slate-900 font-bold rounded';
+      if (hexColor === '#EA4335') return 'bg-red-500 text-white font-bold rounded';
+      return `style="background-color: ${hexColor};" rounded`;
+    }
+
+    let currentMobileTab = 1;
+    function toggleMobileTab() {
+      if (window.innerWidth >= 768) return;
+      currentMobileTab = currentMobileTab === 1 ? 2 : 1;
+      const b1 = document.getElementById('block1Container');
+      const b2 = document.getElementById('block2Container');
+      if (currentMobileTab === 1) {
+        b1.className = "bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden";
+        b2.className = "hidden md:block bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden";
+      } else {
+        b1.className = "hidden md:block bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden";
+        b2.className = "bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden";
+      }
+    }
+  </script>
+</body>
+</html>
