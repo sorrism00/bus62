@@ -1,0 +1,8 @@
+{
+  "app_name": "My Automation App",
+  "version": "1.0.0",
+  "settings": {
+    "auto_run": true,
+    "max_retries": 3
+  }
+}
